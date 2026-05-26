@@ -9,6 +9,7 @@ from uuid import UUID
 from datetime import datetime
 
 from app.database import get_db
+from app.models.models import Organizacion
 from app.services.rat_service import ServicioRAT, RegistroActividadesTratamiento
 from app.services.brechas_service import ServicioBrechas, NotificacionBrecha
 from app.services.webhooks_service import ServicioWebhooks, notificar_revocacion_consentimiento, notificar_solicitud_arco, notificar_brecha_seguridad
@@ -16,7 +17,7 @@ from app.services.eipd_service import ServicioEIPD, EvaluacionImpactoProteccionD
 from app.services.panel_dpo_service import PanelDPOService
 from app.api.routes import get_current_organization
 
-router = APIRouter(prefix="/api/v1", tags=["cumplimiento-ley-21719"])
+router = APIRouter(tags=["cumplimiento-ley-21719"])
 
 # ==================== RAT (Registro Actividades Tratamiento) ====================
 
@@ -31,7 +32,7 @@ async def crear_registro_rat(
     
     # Agregar organizacion_id del usuario autenticado
     data["organizacion_id"] = current_org.id
-    data["responsable_registro"] = current_org.razon_social if current_org.razon_social else "Desconocido")
+    data["responsable_registro"] = current_org.razon_social if current_org.razon_social else "Desconocido"
     
     registro = await servicio.crear_registro(data)
     
@@ -116,7 +117,7 @@ async def crear_notificacion_brecha(
     """Crear notificación de brecha de seguridad (Art. 38-40)"""
     servicio = ServicioBrechas(db)
     
-    data["creado_por"] = current_org.razon_social if current_org.razon_social else "Desconocido")
+    data["creado_por"] = current_org.razon_social if current_org.razon_social else "Desconocido"
     brecha = await servicio.crear_brecha(data, current_org.id)
     
     # Si el riesgo es ALTO o MUY_ALTO, notificar automáticamente
