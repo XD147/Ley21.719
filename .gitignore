@@ -1,77 +1,24 @@
 ```
-# Dependencies
-node_modules/
-frontend/node_modules/
-
-# Build artifacts
-frontend/dist/
-
-# Python cache
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# Environment variables
+# Logs and temp files
+*.log
+*.tmp
+
+# Environment
 .env
 .env.local
-.env.*
+*.env.*
 
-# IDE files
+# Editors
 .vscode/
 .idea/
-*.swp
-*.swo
 
-# Logs
-*.log
-
-# OS generated files
-.DS_Store
-Thumbs.db
-
-# Local configuration
-.git/local_config
-
-# Coverage reports
-coverage/
-htmlcov/
-.coverage
-
-# Virtual environments
-venv/
+# Dependencies
 .venv/
-env/
-ENV/
-
-# Temporary files
-*.tmp
-*.temp
-*~
-
-# Package lock files
-package-lock.json
-yarn.lock
-
-# Browser extensions
-.julia/
-zig*/
-target/
-
-# MyPy cache
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# PyTest cache
-.pytest_cache/
-
-# Distribution / packaging
-dist/
-build/
-*.egg-info/
-
-# System files
-.DS_Store
-Thumbs.db
+venv/
 ```
