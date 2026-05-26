@@ -1,9 +1,16 @@
 ```
 # Dependencies
 node_modules/
+frontend/node_modules/
 
-# Build outputs
-dist/
+# Build artifacts
+frontend/dist/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
 
 # Environment variables
 .env
@@ -13,10 +20,58 @@ dist/
 # IDE files
 .vscode/
 .idea/
+*.swp
+*.swo
 
 # Logs
 *.log
 
-# Package lock
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Local configuration
+.git/local_config
+
+# Coverage reports
+coverage/
+htmlcov/
+.coverage
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# Package lock files
 package-lock.json
+yarn.lock
+
+# Browser extensions
+.julia/
+zig*/
+target/
+
+# MyPy cache
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# PyTest cache
+.pytest_cache/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# System files
+.DS_Store
+Thumbs.db
 ```

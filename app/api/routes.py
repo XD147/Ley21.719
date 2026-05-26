@@ -28,7 +28,6 @@ from app.services.services import (
 )
 from app.utils.security import hash_rut_sha256, normalize_rut
 
-
 router = APIRouter()
 
 
