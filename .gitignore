@@ -1,42 +1,7 @@
-```
-# Compiled Python files
-*.pyc
-__pycache__/
-
-# Dependencies
-.venv/
-venv/
-.env
-.env.local
-*.env.*
-
-# Logs
-*.log
-
-# Coverage reports
-.coverage
-coverage/
-htmlcov/
-
-# IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-*.tmp
-
-# Build artifacts
-build/
-dist/
-*.egg-info/
-target/
-.gradle/
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Testing
-.pytest_cache/
-.mypy_cache/
-```
+(docs/GUIA_USUARIO_CIUDADANO_ORGANIZACION.md
+docs/MANUAL_TECNICO_IMPLEMENTACION.md
+ANALISIS_LEY_21719.md
+AUTENTICACION.md
+IMPLEMENTACION_COMPLETA.md
+IMPLEMENTACION_LEY_21719.md
+IMPLEMENTACION_ULTIMO_KILOMETRO.md)
