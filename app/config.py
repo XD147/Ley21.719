@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     sii_certificate_path: Optional[str] = None
     sii_private_key_path: Optional[str] = None
     
+    # Agencia Digital (Notificación Brechas)
+    agencia_digital_endpoint: str = "https://api.agenciadigital.gob.cl"
+    
     class Config:
         env_file = ".env"
         case_sensitive = False

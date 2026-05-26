@@ -11,6 +11,7 @@ from app.database import engine, Base
 from app.api.routes import router
 from app.api.auth_routes import router as auth_router
 from app.api.cumplimiento import router as cumplimiento_router
+from app.api.portabilidad import router as portabilidad_router
 from app.models import models  # Importar para registrar modelos
 
 
@@ -89,6 +90,7 @@ async def health_check():
 app.include_router(router, prefix=settings.api_v1_prefix)
 app.include_router(auth_router)  # Auth routes ya tienen prefijo /auth
 app.include_router(cumplimiento_router, prefix=settings.api_v1_prefix)  # Cumplimiento Ley 21.719
+app.include_router(portabilidad_router)  # Portabilidad y Notificaciones (ya tiene prefijo /api/v1)
 
 
 if __name__ == "__main__":

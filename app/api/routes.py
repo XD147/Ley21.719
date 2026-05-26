@@ -33,6 +33,37 @@ router = APIRouter()
 
 # ==================== DEPENDENCIAS ====================
 
+def get_current_usuario(request: Request, db: Session = Depends(get_db)) -> Usuario:
+    """
+    Obtiene el usuario actual desde la sesión OAuth.
+    Requiere autenticación previa con ClaveÚnica o SII.
+    """
+    usuario_id = request.session.get("usuario_id")
+    if not usuario_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuario no autenticado"
+        )
+    
+    from uuid import UUID
+    try:
+        usuario_uuid = UUID(usuario_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="ID de usuario inválido"
+        )
+    
+    usuario = db.query(Usuario).filter(Usuario.id == usuario_uuid).first()
+    if not usuario:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario no encontrado"
+        )
+    
+    return usuario
+
+
 def get_current_organization(request: Request, db: Session = Depends(get_db)) -> Organizacion:
     """
     Autentica la organización mediante API Key en el header
