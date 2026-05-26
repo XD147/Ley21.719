@@ -311,3 +311,41 @@ class TraduccionLegalDesign(Base):
     
     def __repr__(self):
         return f"<TraduccionLegalDesign(id={self.id}, categoria={self.categoria})>"
+
+
+# ============================================================================
+# MODELO PARA SUPRESIÓN DE DATOS (Derecho al Olvido - Art. 17)
+# ============================================================================
+
+class EstadoSupresion(enum.Enum):
+    PENDIENTE = "PENDIENTE"
+    PROCESANDO = "PROCESANDO"
+    COMPLETADO = "COMPLETADO"
+    FALLIDO = "FALLIDO"
+
+
+class SolicitudSupresion(Base):
+    __tablename__ = "solicitudes_supresion"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, index=True)
+    usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=False, index=True)
+    rut_ciudadano_hash = Column(String, nullable=False, index=True)
+    
+    motivo = Column(Text, nullable=False)
+    estado = Column(SQLEnum(EstadoSupresion), default=EstadoSupresion.PENDIENTE)
+    
+    fecha_solicitud = Column(DateTime, default=datetime.utcnow, nullable=False)
+    fecha_ejecucion = Column(DateTime)  # Fecha real de ejecución
+    
+    certificado_generado = Column(Boolean, default=False)
+    hash_certificado = Column(String)  # Hash del certificado para verificación
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, onupdate=datetime.utcnow)
+
+    # Relación inversa con Usuario
+    usuario = relationship("Usuario", back_populates="solicitudes_supresion")
+
+
+# Agregar relación inversa en modelo Usuario (se ejecutará después de importar)
+# Esto se maneja en la inicialización de la aplicación
