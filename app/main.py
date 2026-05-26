@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from app.config import settings
 from app.database import engine, Base
 from app.api.routes import router
+from app.api.auth_routes import router as auth_router
 from app.models import models  # Importar para registrar modelos
 
 
@@ -37,6 +38,8 @@ API REST para gestión de protección de datos personales conforme a la Ley 21.7
 * **Consentimientos**: Gestión granular de permisos de acceso a datos
 * **Solicitudes ARCO**: Ejercicio de derechos (Acceso, Rectificación, Cancelación, Oposición)
 * **Auditoría**: Logging completo de accesos para accountability
+* **ClaveÚnica**: Autenticación de usuarios con identidad digital del Gobierno
+* **SII Clave Tributaria**: Autenticación de organizaciones con SII
 
 ### Seguridad:
 
@@ -44,6 +47,7 @@ API REST para gestión de protección de datos personales conforme a la Ley 21.7
 * RUT encriptado con AES-256 para almacenamiento
 * API Keys con hash SHA-256 (nunca se almacenan en claro)
 * Firmas digitales para receipts de consentimiento
+* Integración con ClaveÚnica y SII para autenticación oficial
     """,
     version="1.0.0",
     lifespan=lifespan
@@ -57,6 +61,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Middleware para sesiones (requerido para OAuth callbacks)
+from starlette.middleware.sessions import SessionMiddleware
+app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
 
 
 @app.get("/", tags=["Root"])
@@ -78,6 +86,7 @@ async def health_check():
 
 # Incluir routers
 app.include_router(router, prefix=settings.api_v1_prefix)
+app.include_router(auth_router)  # Auth routes ya tienen prefijo /auth
 
 
 if __name__ == "__main__":
