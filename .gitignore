@@ -1,27 +1,25 @@
-```
+```gitignore
 # Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-
-# Logs and temp files
-*.log
-*.tmp
-
-# Environment
-.env
-.env.local
-*.env.*
-
-# Editors
-.vscode/
-.idea/
+*.py~
 
 # Dependencies
 .venv/
 venv/
-node_modules/
+.env
+.env.local
+.env.*
+
+# Logs and temporary files
+*.log
+*.tmp
+
+# Editors
+.vscode/
+.idea/
 
 # Build artifacts
 dist/
