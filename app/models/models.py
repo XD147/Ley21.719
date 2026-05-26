@@ -3,8 +3,8 @@ Modelos de datos para Ley 21.719 - Protección de Datos (Chile)
 Implementa el diagrama entidad-relación especificado
 """
 
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Enum, Text, LargeBinary
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Enum as SQLEnum, Text, LargeBinary, Integer
+from sqlalchemy.dialects.postgresql import UUID as PGUUID, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
@@ -72,14 +72,14 @@ class Usuario(Base):
     """
     __tablename__ = "usuarios"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     rut_hash = Column(String(64), unique=True, index=True, nullable=False)  # SHA-256
     rut_encriptado = Column(String(256), nullable=False)  # AES-256
     nombre_completo = Column(String(255), nullable=False)
     email = Column(String(255), unique=True, nullable=False, index=True)
     telefono = Column(String(50))
     fecha_nacimiento = Column(DateTime, nullable=False)
-    tutor_id = Column(UUID(as_uuid=True), ForeignKey('usuarios.id'), nullable=True)
+    tutor_id = Column(PGUUID(as_uuid=True), ForeignKey('usuarios.id'), nullable=True)
     fecha_registro = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     # Relaciones
@@ -99,7 +99,7 @@ class Organizacion(Base):
     """
     __tablename__ = "organizaciones"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     rut = Column(String(20), unique=True, nullable=False, index=True)
     razon_social = Column(String(255), nullable=False)
     email_dpo = Column(String(255), nullable=False)  # Contacto Oficial Agencia
@@ -126,8 +126,8 @@ class OrganizacionApiKey(Base):
     """
     __tablename__ = "organizaciones_api_keys"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    organizacion_id = Column(UUID(as_uuid=True), ForeignKey('organizaciones.id'), nullable=False)
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organizacion_id = Column(PGUUID(as_uuid=True), ForeignKey('organizaciones.id'), nullable=False)
     nombre = Column(String(100), nullable=False)
     prefix = Column(String(20), nullable=False)  # ej: "cl_ly_prod_..."
     key_hash = Column(String(64), unique=True, nullable=False)  # SHA-256
@@ -151,12 +151,12 @@ class AccesoOrganizacion(Base):
     """
     __tablename__ = "accesos_organizacion"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    usuario_id = Column(UUID(as_uuid=True), ForeignKey('usuarios.id'), nullable=False)
-    organizacion_id = Column(UUID(as_uuid=True), ForeignKey('organizaciones.id'), nullable=False)
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    usuario_id = Column(PGUUID(as_uuid=True), ForeignKey('usuarios.id'), nullable=False)
+    organizacion_id = Column(PGUUID(as_uuid=True), ForeignKey('organizaciones.id'), nullable=False)
     categoria_dato = Column(String(100), nullable=False)  # SALUD, BIOMETRIA, etc.
     finalidad = Column(Text, nullable=False)  # Uso específico declarado
-    estado = Column(Enum(EstadoPermiso), default=EstadoPermiso.ACTIVO, nullable=False)
+    estado = Column(SQLEnum(EstadoPermiso), default=EstadoPermiso.ACTIVO, nullable=False)
     receipt_hash = Column(String(64), nullable=False)  # Firma digital del pacto
     fecha_otorgamiento = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     fecha_expiracion = Column(DateTime(timezone=True), nullable=True)
@@ -179,15 +179,15 @@ class SolicitudConsentimiento(Base):
     """
     __tablename__ = "solicitudes_consentimiento"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    organizacion_id = Column(UUID(as_uuid=True), ForeignKey('organizaciones.id'), nullable=False)
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organizacion_id = Column(PGUUID(as_uuid=True), ForeignKey('organizaciones.id'), nullable=False)
     rut_ciudadano_hash = Column(String(64), nullable=False, index=True)
-    estado = Column(Enum(EstadoSolicitud), default=EstadoSolicitud.PENDIENTE, nullable=False)
-    proposal_json = Column(JSONB, nullable=False)  # Estructura granular de permisos
-    ai_flag = Column(Enum(AiFlag), default=AiFlag.NONE, nullable=False)
+    estado = Column(SQLEnum(EstadoSolicitud), default=EstadoSolicitud.PENDIENTE, nullable=False)
+    proposal_json = Column(JSON, nullable=False)  # Estructura granular de permisos
+    ai_flag = Column(SQLEnum(AiFlag), default=AiFlag.NONE, nullable=False)
     texto_legal_presentado = Column(Text, nullable=False)
     request_type = Column(String(50), default="NORMAL", nullable=False)  # NORMAL, PORTABILIDAD
-    source_organization_id = Column(UUID(as_uuid=True), ForeignKey('organizaciones.id'), nullable=True)
+    source_organization_id = Column(PGUUID(as_uuid=True), ForeignKey('organizaciones.id'), nullable=True)
     fecha_solicitud = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     fecha_respuesta = Column(DateTime(timezone=True), nullable=True)
     ip_solicitud = Column(String(45), nullable=True)
@@ -209,11 +209,11 @@ class SolicitudArco(Base):
     """
     __tablename__ = "solicitudes_arco"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    organizacion_id = Column(UUID(as_uuid=True), ForeignKey('organizaciones.id'), nullable=False)
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organizacion_id = Column(PGUUID(as_uuid=True), ForeignKey('organizaciones.id'), nullable=False)
     rut_ciudadano_hash = Column(String(64), nullable=False, index=True)
-    tipo = Column(Enum(TipoArco), nullable=False)
-    estado = Column(Enum(EstadoArco), default=EstadoArco.PENDIENTE, nullable=False)
+    tipo = Column(SQLEnum(TipoArco), nullable=False)
+    estado = Column(SQLEnum(EstadoArco), default=EstadoArco.PENDIENTE, nullable=False)
     token_evidencia_identidad = Column(String(64), nullable=False)  # Hash ClaveÚnica/Firma
     prorrogado = Column(Boolean, default=False, nullable=False)
     descripcion = Column(Text, nullable=True)
@@ -237,16 +237,16 @@ class LogAccesoDatos(Base):
     """
     __tablename__ = "logs_acceso_datos"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    usuario_id = Column(UUID(as_uuid=True), ForeignKey('usuarios.id'), nullable=False)
-    organizacion_id = Column(UUID(as_uuid=True), ForeignKey('organizaciones.id'), nullable=False)
-    tipo_acceso = Column(Enum(TipoAcceso), nullable=False)  # LECTURA, MODIFICACION, etc.
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    usuario_id = Column(PGUUID(as_uuid=True), ForeignKey('usuarios.id'), nullable=False)
+    organizacion_id = Column(PGUUID(as_uuid=True), ForeignKey('organizaciones.id'), nullable=False)
+    tipo_acceso = Column(SQLEnum(TipoAcceso), nullable=False)  # LECTURA, MODIFICACION, etc.
     categoria_dato_consultado = Column(String(100), nullable=False)
     justificacion_legal = Column(Text, nullable=False)
     ip_origen = Column(String(45), nullable=False)
     user_agent = Column(String(500), nullable=True)
     fecha_acceso = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
-    detalles_adicionales = Column(JSONB, nullable=True)
+    detalles_adicionales = Column(JSON, nullable=True)
     
     # Relaciones
     usuario = relationship("Usuario", back_populates="logs_acceso")
