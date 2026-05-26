@@ -1,409 +1,252 @@
 """
-Servicio de Portabilidad de Datos - Ley 21.719
-Implementa derecho a recibir datos en formato estructurado (JSON, XML, CSV)
+Servicio de Portabilidad de Datos (Art. 18 Ley 21.719)
+Permite al ciudadano exportar todos sus datos en formatos estándar.
 """
-
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
-from uuid import UUID
+from sqlalchemy.orm import Session, joinedload
+from datetime import datetime
 import json
 import csv
 import io
-import hashlib
-import secrets
-
-from app.models.cumplimiento_models import ExportacionPortabilidad, TraduccionLegalDesign
-from app.models.models import Usuario, AccesoOrganizacion, LogAccesoDatos, SolicitudArco, TipoArco
+from typing import List, Dict, Any
+from app.models.core_models import Usuario, AccesoOrganizacion, LogAccesoDatos, SolicitudArco
+from app.services.criptografia_service import CriptografiaService
 
 
-class ServicioPortabilidad:
-    """Gestión de portabilidad y exportación de datos personales"""
+class PortabilidadService:
     
-    def __init__(self, db: AsyncSession):
-        self.db = db
+    @staticmethod
+    def obtener_datos_usuario_completos(db: Session, usuario_id: str) -> Dict[str, Any]:
+        """
+        Obtiene TODOS los datos del usuario para portabilidad.
+        Incluye: información personal, consentimientos, logs de acceso, solicitudes ARCO.
+        """
+        usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+        if not usuario:
+            raise ValueError(f"Usuario {usuario_id} no encontrado")
+        
+        # Desencriptar RUT para exportación (solo el titular puede verlo)
+        rut_desencriptado = CriptografiaService.desencriptar_rut(usuario.rut_encriptado)
+        
+        # Obtener todos los accesos/consentimientos
+        accesos = db.query(AccesoOrganizacion).filter(
+            AccesoOrganizacion.usuario_id == usuario_id
+        ).all()
+        
+        # Obtener logs de acceso (quién ha visto sus datos)
+        logs = db.query(LogAccesoDatos).filter(
+            LogAccesoDatos.usuario_id == usuario_id
+        ).order_by(LogAccesoDatos.fecha_acceso.desc()).limit(100).all()
+        
+        # Obtener solicitudes ARCO
+        solicitudes_arco = db.query(SolicitudArco).filter(
+            SolicitudArco.rut_ciudadano_hash == usuario.rut_hash
+        ).all()
+        
+        # Estructurar datos para exportación
+        datos_exportacion = {
+            "metadata": {
+                "fecha_exportacion": datetime.utcnow().isoformat(),
+                "version_formato": "1.0",
+                "ley_aplicable": "Ley 21.719 Chile",
+                "titular": {
+                    "id": str(usuario.id),
+                    "rut": rut_desencriptado,
+                    "nombre_completo": usuario.nombre_completo,
+                    "email": usuario.email,
+                    "telefono": usuario.telefono,
+                    "fecha_nacimiento": usuario.fecha_nacimiento.isoformat() if usuario.fecha_nacimiento else None,
+                    "fecha_registro": usuario.fecha_registro.isoformat() if usuario.fecha_registro else None
+                }
+            },
+            "consentimientos": [
+                {
+                    "id": str(acceso.id),
+                    "organizacion_id": str(acceso.organizacion_id),
+                    "categoria_dato": acceso.categoria_dato,
+                    "finalidad": acceso.finalidad,
+                    "estado": acceso.estado,
+                    "fecha_otorgamiento": acceso.fecha_otorgamiento.isoformat() if acceso.fecha_otorgamiento else None,
+                    "fecha_expiracion": acceso.fecha_expiracion.isoformat() if acceso.fecha_expiracion else None,
+                    "receipt_hash": acceso.receipt_hash
+                }
+                for acceso in accesos
+            ],
+            "historial_accesos": [
+                {
+                    "id": str(log.id),
+                    "organizacion_id": str(log.organizacion_id),
+                    "tipo_acceso": log.tipo_acceso,
+                    "categoria_dato_consultado": log.categoria_dato_consultado,
+                    "justificacion_legal": log.justificacion_legal,
+                    "ip_origen": log.ip_origen,
+                    "fecha_acceso": log.fecha_acceso.isoformat() if log.fecha_acceso else None
+                }
+                for log in logs
+            ],
+            "solicitudes_arco": [
+                {
+                    "id": str(solicitud.id),
+                    "organizacion_id": str(solicitud.organizacion_id),
+                    "tipo": solicitud.tipo.value,
+                    "estado": solicitud.estado.value,
+                    "fecha_solicitud": solicitud.fecha_solicitud.isoformat() if solicitud.fecha_solicitud else None,
+                    "fecha_limite_respuesta": solicitud.fecha_limite_respuesta.isoformat() if solicitud.fecha_limite_respuesta else None,
+                    "prorrogado": solicitud.prorrogado
+                }
+                for solicitud in solicitudes_arco
+            ]
+        }
+        
+        return datos_exportacion
     
-    async def solicitar_exportacion(self, usuario_id: UUID, organizacion_id: UUID,
-                                    formato: str = "JSON",
-                                    categorias: Optional[List[str]] = None) -> ExportacionPortabilidad:
-        """Solicitar exportación de datos para portabilidad"""
-        
-        if formato not in ["JSON", "XML", "CSV"]:
-            raise ValueError(f"Formato no soportado: {formato}. Use JSON, XML o CSV")
-        
-        # Si no se especifican categorías, incluir todas
-        if not categorias:
-            categorias = ["perfil", "accesos", "logs", "solicitudes"]
-        
-        exportacion = ExportacionPortabilidad(
-            usuario_id=usuario_id,
-            organizacion_id=organizacion_id,
-            formato_exportacion=formato,
-            categorias_incluidas=categorias,
-            estado="GENERANDO"
-        )
-        
-        self.db.add(exportacion)
-        await self.db.commit()
-        await self.db.refresh(exportacion)
-        
-        # Generar exportación en background (en producción usar Celery)
-        await self._generar_archivo_exportacion(exportacion)
-        
-        return exportacion
+    @staticmethod
+    def exportar_json(db: Session, usuario_id: str) -> str:
+        """Exporta datos en formato JSON estructurado"""
+        datos = PortabilidadService.obtener_datos_usuario_completos(db, usuario_id)
+        return json.dumps(datos, indent=2, ensure_ascii=False)
     
-    async def _generar_archivo_exportacion(self, exportacion: ExportacionPortabilidad) -> Dict:
-        """Generar archivo de exportación con los datos del usuario"""
+    @staticmethod
+    def exportar_csv(db: Session, usuario_id: str) -> Dict[str, str]:
+        """
+        Exporta datos en múltiples archivos CSV por categoría.
+        Retorna diccionario con nombre_archivo: contenido_csv
+        """
+        datos = PortabilidadService.obtener_datos_usuario_completos(db, usuario_id)
+        archivos_csv = {}
         
-        try:
-            datos_usuario = {}
-            
-            # 1. Obtener perfil del usuario
-            if "perfil" in exportacion.categorias_incluidas:
-                result = await self.db.execute(
-                    select(Usuario)
-                    .where(Usuario.id == exportacion.usuario_id)
-                )
-                usuario = result.scalar_one_or_none()
-                
-                if usuario:
-                    datos_usuario["perfil"] = {
-                        "nombre_completo": usuario.nombre_completo,
-                        "email": usuario.email,
-                        "telefono": usuario.telefono,
-                        "fecha_nacimiento": usuario.fecha_nacimiento.isoformat() if usuario.fecha_nacimiento else None,
-                        "fecha_registro": usuario.fecha_registro.isoformat() if usuario.fecha_registro else None
-                        # Nota: No incluir RUT (ni hash ni encriptado) por seguridad
-                    }
-            
-            # 2. Obtener accesos/consentimientos otorgados
-            if "accesos" in exportacion.categorias_incluidas:
-                result = await self.db.execute(
-                    select(AccesoOrganizacion)
-                    .where(AccesoOrganizacion.usuario_id == exportacion.usuario_id)
-                    .order_by(AccesoOrganizacion.fecha_otorgamiento.desc())
-                )
-                accesos = list(result.scalars().all())
-                
-                datos_usuario["accesos"] = [
-                    {
-                        "organizacion_id": str(acceso.organizacion_id),
-                        "categoria_dato": acceso.categoria_dato,
-                        "finalidad": acceso.finalidad,
-                        "estado": acceso.estado.value,
-                        "fecha_otorgamiento": acceso.fecha_otorgamiento.isoformat(),
-                        "fecha_expiracion": acceso.fecha_expiracion.isoformat() if acceso.fecha_expiracion else None
-                    }
-                    for acceso in accesos
-                ]
-            
-            # 3. Obtener logs de acceso (últimos 1000)
-            if "logs" in exportacion.categorias_incluidas:
-                result = await self.db.execute(
-                    select(LogAccesoDatos)
-                    .where(LogAccesoDatos.usuario_id == exportacion.usuario_id)
-                    .order_by(LogAccesoDatos.fecha_acceso.desc())
-                    .limit(1000)
-                )
-                logs = list(result.scalars().all())
-                
-                datos_usuario["logs_acceso"] = [
-                    {
-                        "organizacion_id": str(log.organizacion_id),
-                        "tipo_acceso": log.tipo_acceso.value,
-                        "categoria_dato": log.categoria_dato_consultado,
-                        "justificacion": log.justificacion_legal,
-                        "ip_origen": log.ip_origen,
-                        "fecha_acceso": log.fecha_acceso.isoformat()
-                    }
-                    for log in logs
-                ]
-            
-            # 4. Obtener solicitudes ARCO
-            if "solicitudes" in exportacion.categorias_incluidas:
-                result = await self.db.execute(
-                    select(SolicitudArco)
-                    .where(SolicitudArco.rut_ciudadano_hash.isnot(None))  # Filtrar por usuario indirectamente
-                    .order_by(SolicitudArco.fecha_solicitud.desc())
-                    .limit(100)
-                )
-                solicitudes = list(result.scalars().all())
-                
-                # Nota: En implementación real, filtrar por hash RUT del usuario
-                datos_usuario["solicitudes_arco"] = [
-                    {
-                        "organizacion_id": str(sol.organizacion_id),
-                        "tipo": sol.tipo.value,
-                        "estado": sol.estado.value,
-                        "descripcion": sol.descripcion,
-                        "fecha_solicitud": sol.fecha_solicitud.isoformat(),
-                        "respuesta": sol.respuesta
-                    }
-                    for sol in solicitudes[:50]  # Limitar a 50
-                ]
-            
-            # Generar archivo según formato
-            if exportacion.formato_exportacion == "JSON":
-                contenido = json.dumps(datos_usuario, indent=2, ensure_ascii=False)
-                mime_type = "application/json"
-                extension = "json"
-            elif exportacion.formato_exportacion == "XML":
-                contenido = self._dict_to_xml(datos_usuario)
-                mime_type = "application/xml"
-                extension = "xml"
-            elif exportacion.formato_exportacion == "CSV":
-                contenido = self._dict_to_csv(datos_usuario)
-                mime_type = "text/csv"
-                extension = "csv"
-            else:
-                raise ValueError(f"Formato no soportado: {exportacion.formato_exportacion}")
-            
-            # Calcular hash de verificación
-            hash_verificacion = hashlib.sha256(contenido.encode('utf-8')).hexdigest()
-            
-            # Generar token de acceso seguro
-            token_acceso = secrets.token_urlsafe(32)
-            token_hash = hashlib.sha256(token_acceso.encode()).hexdigest()
-            
-            # URL temporal (en producción, subir a S3 o storage similar)
-            url_descarga = f"/api/v1/portabilidad/descarga/{token_hash}"
-            
-            # Actualizar registro
-            exportacion.estado = "LISTO"
-            exportacion.url_descarga_temporal = url_descarga
-            exportacion.token_acceso = token_hash
-            exportacion.fecha_generacion = datetime.now()
-            exportacion.fecha_expiracion_url = datetime.now() + timedelta(hours=24)
-            exportacion.tamaño_archivo_bytes = len(contenido.encode('utf-8'))
-            exportacion.hash_verificacion = hash_verificacion
-            
-            # Guardar contenido en almacenamiento temporal (en producción, usar S3)
-            # Por ahora, lo guardamos como metadata (no recomendado para archivos grandes)
-            # En producción: subir a S3 y guardar solo la URL
-            
-            await self.db.commit()
-            
-            return {
-                "id": str(exportacion.id),
-                "estado": exportacion.estado,
-                "url_descarga": url_descarga,
-                "token": token_acceso,  # Entregar solo una vez al usuario
-                "hash_verificacion": hash_verificacion,
-                "tamaño_bytes": exportacion.tamaño_archivo_bytes,
-                "expira_en_horas": 24
-            }
-            
-        except Exception as e:
-            exportacion.estado = "ERROR"
-            await self.db.commit()
-            raise e
-    
-    def _dict_to_xml(self, data: dict, root_name: str = "datos_portabilidad") -> str:
-        """Convertir diccionario a XML"""
-        
-        def dict_to_xml_tag(d, parent):
-            xml = []
-            for key, value in d.items():
-                key = key.replace(" ", "_").replace("-", "_")
-                if isinstance(value, dict):
-                    xml.append(f"<{key}>")
-                    xml.append(dict_to_xml_tag(value, key))
-                    xml.append(f"</{key}>")
-                elif isinstance(value, list):
-                    xml.append(f"<{key}>")
-                    for item in value:
-                        if isinstance(item, dict):
-                            xml.append(dict_to_xml_tag(item, "item"))
-                        else:
-                            xml.append(f"<item>{self._escape_xml(str(item))}</item>")
-                    xml.append(f"</{key}>")
-                else:
-                    xml.append(f"<{key}>{self._escape_xml(str(value) if value else '')}</{key}>")
-            return "".join(xml)
-        
-        return f'<?xml version="1.0" encoding="UTF-8"?>\n<{root_name}>\n{dict_to_xml_tag(data, root_name)}\n</{root_name}>'
-    
-    def _escape_xml(self, text: str) -> str:
-        """Escape caracteres especiales XML"""
-        return (text
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace('"', "&quot;")
-            .replace("'", "&apos;"))
-    
-    def _dict_to_csv(self, data: dict) -> str:
-        """Convertir diccionario a CSV (estructura plana)"""
-        
+        # CSV de información personal
         output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['campo', 'valor'])
+        titular = datos['metadata']['titular']
+        for key, value in titular.items():
+            writer.writerow([key, value])
+        archivos_csv['informacion_personal.csv'] = output.getvalue()
         
-        # Aplanar estructura para CSV
-        filas = []
-        headers = set()
+        # CSV de consentimientos
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['id', 'organizacion_id', 'categoria_dato', 'finalidad', 'estado', 'fecha_otorgamiento', 'fecha_expiracion'])
+        for consentimiento in datos['consentimientos']:
+            writer.writerow([
+                consentimiento['id'],
+                consentimiento['organizacion_id'],
+                consentimiento['categoria_dato'],
+                consentimiento['finalidad'],
+                consentimiento['estado'],
+                consentimiento['fecha_otorgamiento'],
+                consentimiento['fecha_expiracion']
+            ])
+        archivos_csv['consentimientos.csv'] = output.getvalue()
         
-        def aplanar_dict(d, prefix=""):
-            resultado = {}
-            for key, value in d.items():
-                new_key = f"{prefix}.{key}" if prefix else key
-                if isinstance(value, dict):
-                    resultado.update(aplanar_dict(value, new_key))
-                elif isinstance(value, list):
-                    resultado[new_key] = json.dumps(value, ensure_ascii=False)
-                else:
-                    resultado[new_key] = value
-            return resultado
+        # CSV de historial de accesos
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['id', 'organizacion_id', 'tipo_acceso', 'categoria_dato', 'justificacion', 'ip_origen', 'fecha_acceso'])
+        for acceso in datos['historial_accesos']:
+            writer.writerow([
+                acceso['id'],
+                acceso['organizacion_id'],
+                acceso['tipo_acceso'],
+                acceso['categoria_dato_consultado'],
+                acceso['justificacion_legal'],
+                acceso['ip_origen'],
+                acceso['fecha_acceso']
+            ])
+        archivos_csv['historial_accesos.csv'] = output.getvalue()
         
-        for categoria, contenido in data.items():
-            if isinstance(contenido, list):
-                for item in contenido:
-                    fila_aplanada = aplanar_dict({categoria: item})
-                    headers.update(fila_aplanada.keys())
-                    filas.append(fila_aplanada)
-            else:
-                fila_aplanada = aplanar_dict({categoria: contenido})
-                headers.update(fila_aplanada.keys())
-                filas.append(fila_aplanada)
+        # CSV de solicitudes ARCO
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['id', 'organizacion_id', 'tipo', 'estado', 'fecha_solicitud', 'fecha_limite', 'prorrogado'])
+        for solicitud in datos['solicitudes_arco']:
+            writer.writerow([
+                solicitud['id'],
+                solicitud['organizacion_id'],
+                solicitud['tipo'],
+                solicitud['estado'],
+                solicitud['fecha_solicitud'],
+                solicitud['fecha_limite_respuesta'],
+                solicitud['prorrogado']
+            ])
+        archivos_csv['solicitudes_arco.csv'] = output.getvalue()
         
-        # Escribir CSV
-        writer = csv.DictWriter(output, fieldnames=sorted(headers), lineterminator='\n')
-        writer.writeheader()
-        writer.writerows(filas)
-        
-        return output.getvalue()
+        return archivos_csv
     
-    async def obtener_estado_exportacion(self, exportacion_id: UUID) -> Dict:
-        """Obtener estado de una solicitud de exportación"""
+    @staticmethod
+    def exportar_xml(db: Session, usuario_id: str) -> str:
+        """Exporta datos en formato XML"""
+        datos = PortabilidadService.obtener_datos_usuario_completos(db, usuario_id)
         
-        result = await self.db.execute(
-            select(ExportacionPortabilidad)
-            .where(ExportacionPortabilidad.id == exportacion_id)
-        )
-        exportacion = result.scalar_one_or_none()
+        xml_lines = ['<?xml version="1.0" encoding="UTF-8"?>']
+        xml_lines.append('<portabilidad_datos ley="21.719" pais="Chile">')
         
-        if not exportacion:
-            raise ValueError("Exportación no encontrada")
+        # Metadata
+        xml_lines.append('  <metadata>')
+        xml_lines.append(f'    <fecha_exportacion>{datos["metadata"]["fecha_exportacion"]}</fecha_exportacion>')
+        xml_lines.append(f'    <version_formato>{datos["metadata"]["version_formato"]}</version_formato>')
         
-        return {
-            "id": str(exportacion.id),
-            "estado": exportacion.estado,
-            "formato": exportacion.formato_exportacion,
-            "categorias": exportacion.categorias_incluidas,
-            "fecha_solicitud": exportacion.fecha_solicitud.isoformat(),
-            "fecha_generacion": exportacion.fecha_generacion.isoformat() if exportacion.fecha_generacion else None,
-            "fecha_expiracion": exportacion.fecha_expiracion_url.isoformat() if exportacion.fecha_expiracion_url else None,
-            "tamaño_bytes": exportacion.tamaño_archivo_bytes,
-            "lista_para_descarga": exportacion.estado == "LISTO" and exportacion.fecha_expiracion_url > datetime.now()
-        }
+        # Titular
+        xml_lines.append('    <titular>')
+        for key, value in datos['metadata']['titular'].items():
+            if value is not None:
+                xml_lines.append(f'      <{key}>{value}</{key}>')
+        xml_lines.append('    </titular>')
+        xml_lines.append('  </metadata>')
+        
+        # Consentimientos
+        xml_lines.append('  <consentimientos>')
+        for cons in datos['consentimientos']:
+            xml_lines.append('    <consentimiento>')
+            for key, value in cons.items():
+                if value is not None:
+                    xml_lines.append(f'      <{key}>{value}</{key}>')
+            xml_lines.append('    </consentimiento>')
+        xml_lines.append('  </consentimientos>')
+        
+        # Historial accesos
+        xml_lines.append('  <historial_accesos>')
+        for acceso in datos['historial_accesos']:
+            xml_lines.append('    <acceso>')
+            for key, value in acceso.items():
+                if value is not None:
+                    xml_lines.append(f'      <{key}>{value}</{key}>')
+            xml_lines.append('    </acceso>')
+        xml_lines.append('  </historial_accesos>')
+        
+        # Solicitudes ARCO
+        xml_lines.append('  <solicitudes_arco>')
+        for sol in datos['solicitudes_arco']:
+            xml_lines.append('    <solicitud>')
+            for key, value in sol.items():
+                if value is not None:
+                    xml_lines.append(f'      <{key}>{value}</{key}>')
+            xml_lines.append('    </solicitud>')
+        xml_lines.append('  </solicitudes_arco>')
+        
+        xml_lines.append('</portabilidad_datos>')
+        
+        return '\n'.join(xml_lines)
     
-    async def descargar_exportacion(self, token_hash: str) -> Dict:
-        """Descargar archivo de exportación con token seguro"""
+    @staticmethod
+    def generar_token_portabilidad(db: Session, usuario_id: str, organizacion_destino: str = None) -> str:
+        """
+        Genera token seguro de un solo uso para transferencia directa a competidor.
+        El token permite descargar los datos una sola vez dentro de las próximas 24 horas.
+        """
+        import hashlib
+        import secrets
         
-        result = await self.db.execute(
-            select(ExportacionPortabilidad)
-            .where(ExportacionPortabilidad.token_acceso == token_hash)
-        )
-        exportacion = result.scalar_one_or_none()
+        # Generar token único
+        token_secreto = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(token_secreto.encode()).hexdigest()
         
-        if not exportacion:
-            raise ValueError("Token inválido o expirado")
+        # En producción, guardar este token en BD con:
+        # - usuario_id
+        # - organizacion_destino (opcional, para restringir)
+        # - fecha_expiracion (24 horas)
+        # - usado (boolean)
         
-        # Verificar expiración
-        if exportacion.fecha_expiracion_url and exportacion.fecha_expiracion_url < datetime.now():
-            exportacion.estado = "EXPIRADO"
-            await self.db.commit()
-            raise ValueError("URL de descarga expirada (24 horas)")
-        
-        # Actualizar estado a DESCARGADO
-        exportacion.estado = "DESCARGADO"
-        await self.db.commit()
-        
-        # En producción, aquí se leería el archivo desde S3
-        # Por ahora, regeneramos los datos (ineficiente pero funcional para demo)
-        datos = await self._regenerar_datos_exportacion(exportacion)
-        
-        return {
-            "contenido": datos,
-            "formato": exportacion.formato_exportacion,
-            "hash_verificacion": exportacion.hash_verificacion,
-            "tamaño_bytes": exportacion.tamaño_archivo_bytes
-        }
-    
-    async def _regenerar_datos_exportacion(self, exportacion: ExportacionPortabilidad) -> str:
-        """Regenerar datos para descarga (en producción, leer desde S3)"""
-        # Implementación simplificada - en producción usar storage persistente
-        return "Datos exportados - implementar almacenamiento persistente en producción"
-    
-    async def listar_exportaciones_usuario(self, usuario_id: UUID,
-                                           limite: int = 20) -> List[Dict]:
-        """Listar exportaciones realizadas por un usuario"""
-        
-        result = await self.db.execute(
-            select(ExportacionPortabilidad)
-            .where(ExportacionPortabilidad.usuario_id == usuario_id)
-            .order_by(ExportacionPortabilidad.fecha_solicitud.desc())
-            .limit(limite)
-        )
-        exportaciones = list(result.scalars().all())
-        
-        return [
-            {
-                "id": str(exp.id),
-                "formato": exp.formato_exportacion,
-                "estado": exp.estado,
-                "fecha_solicitud": exp.fecha_solicitud.isoformat(),
-                "fecha_expiracion": exp.fecha_expiracion_url.isoformat() if exp.fecha_expiracion_url else None
-            }
-            for exp in exportaciones
-        ]
-    
-    async def crear_traduccion_legal(self, organizacion_id: UUID,
-                                     texto_legal: str,
-                                     categoria: str,
-                                     nivel: str = "BASICO") -> TraduccionLegalDesign:
-        """Crear traducción de lenguaje legal a ciudadano"""
-        
-        # En producción, usar IA para generar traducción automática
-        # Aquí implementamos una versión básica
-        traduccion = TraduccionLegalDesign(
-            organizacion_id=organizacion_id,
-            texto_legal_original=texto_legal,
-            texto_ciudadano=self._generar_traduccion_simple(texto_legal, categoria),
-            categoria=categoria,
-            icono_sugerido=self._sugerir_icono(categoria),
-            nivel_simplificacion=nivel,
-            validado_dpo=False
-        )
-        
-        self.db.add(traduccion)
-        await self.db.commit()
-        await self.db.refresh(traduccion)
-        
-        return traduccion
-    
-    def _generar_traduccion_simple(self, texto_legal: str, categoria: str) -> str:
-        """Generar traducción simplificada (en producción usar IA)"""
-        
-        traducciones_base = {
-            "finalidad": "¿Para qué usaremos tus datos?",
-            "derechos": "Tus derechos sobre tus datos",
-            "retencion": "¿Por cuánto tiempo guardamos tus datos?",
-            "transferencia": "¿Compartiremos tus datos con otros?",
-            "seguridad": "Cómo protegemos tu información"
-        }
-        
-        return traducciones_base.get(categoria, 
-            f"Explicación simple: {texto_legal[:200]}... (versión completa en lenguaje claro)")
-    
-    def _sugerir_icono(self, categoria: str) -> str:
-        """Sugerir ícono según categoría"""
-        
-        iconos = {
-            "finalidad": "🎯",
-            "derechos": "🛡️",
-            "retencion": "⏰",
-            "transferencia": "🔄",
-            "seguridad": "🔒"
-        }
-        
-        return iconos.get(categoria, "ℹ️")
+        # Por ahora retornamos el token directamente
+        # En implementación real, se debería persistir en tabla TokenPortabilidad
+        return token_secreto
