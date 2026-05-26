@@ -1,0 +1,256 @@
+version: '3.8'
+
+# Docker Compose para Ley 21.719 - Protección de Datos Chile
+# Incluye: API, Frontend, Celery Workers, Redis, PostgreSQL
+# Cumplimiento total con Art. 38-40 (Brechas), Art. 6 (Ciclo de vida)
+
+services:
+  # =============================================================================
+  # BASE DE DATOS POSTGRESQL
+  # =============================================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: ley21719-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ley21719}
+      POSTGRES_USER: ${POSTGRES_USER:-ley21719_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password_change_me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ley21719_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ley21719-network
+    restart: unless-stopped
+
+  # =============================================================================
+  # REDIS - Message Broker para Celery
+  # =============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: ley21719-redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_secure_password}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ley21719-network
+    restart: unless-stopped
+
+  # =============================================================================
+  # API FASTAPI - Servicio Principal
+  # =============================================================================
+  api:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: ley21719-api
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${API_WORKERS:-4}
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ley21719_user}:${POSTGRES_PASSWORD:-secure_password_change_me}@postgres:5432/${POSTGRES_DB:-ley21719}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_secure_password}@redis:6379/0
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      SECRET_KEY: ${SECRET_KEY}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      KMS_PROVIDER: ${KMS_PROVIDER:-local}
+      AGENCIA_API_URL: ${AGENCIA_API_URL:-}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+    volumes:
+      - ./app:/app
+      - ./logs:/app/logs
+      - ./certificates:/app/certificates
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ley21719-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  # =============================================================================
+  # CELERY WORKER - Tareas Asíncronas (Eliminación, Brechas, Notificaciones)
+  # =============================================================================
+  celery-worker:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: ley21719-celery-worker
+    command: celery -A app.core.celery_app worker --loglevel=info --concurrency=${CELERY_WORKER_CONCURRENCY:-4} -Q lifecycle,brechas,notifications,maintenance,reports
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ley21719_user}:${POSTGRES_PASSWORD:-secure_password_change_me}@postgres:5432/${POSTGRES_DB:-ley21719}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_secure_password}@redis:6379/0
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      SECRET_KEY: ${SECRET_KEY}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      KMS_PROVIDER: ${KMS_PROVIDER:-local}
+      AGENCIA_API_URL: ${AGENCIA_API_URL:-}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+    volumes:
+      - ./app:/app
+      - ./logs:/app/logs
+      - ./certificates:/app/certificates
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "celery", "-A", "app.core.celery_app", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ley21719-network
+    restart: unless-stopped
+    deploy:
+      replicas: ${CELERY_WORKER_REPLICAS:-2}
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  # =============================================================================
+  # CELERY BEAT - Scheduler para Cron Jobs (Tareas programadas)
+  # =============================================================================
+  celery-beat:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: ley21719-celery-beat
+    command: celery -A app.core.celery_app beat --loglevel=info
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ley21719_user}:${POSTGRES_PASSWORD:-secure_password_change_me}@postgres:5432/${POSTGRES_DB:-ley21719}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_secure_password}@redis:6379/0
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      SECRET_KEY: ${SECRET_KEY}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      KMS_PROVIDER: ${KMS_PROVIDER:-local}
+      TZ: America/Santiago
+    volumes:
+      - ./app:/app
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ley21719-network
+    restart: unless-stopped
+
+  # =============================================================================
+  # FLOWER - Monitor de Celery (Dashboard en tiempo real)
+  # =============================================================================
+  flower:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: ley21719-flower
+    command: celery -A app.core.celery_app flower --port=5555
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_secure_password}@redis:6379/0
+      FLOWER_BASIC_AUTH: ${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-flower_secure_password}
+    ports:
+      - "${FLOWER_PORT:-5555}:5555"
+    depends_on:
+      - redis
+      - celery-worker
+    networks:
+      - ley21719-network
+    restart: unless-stopped
+
+  # =============================================================================
+  # FRONTEND REACT - Interfaz de Usuario
+  # =============================================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+        - VITE_CLAVEUNICA_CLIENT_ID=${VITE_CLAVEUNICA_CLIENT_ID:-}
+        - VITE_SII_CLIENT_ID=${VITE_SII_CLIENT_ID:-}
+    container_name: ley21719-frontend
+    command: nginx -g "daemon off;"
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - api
+    networks:
+      - ley21719-network
+    restart: unless-stopped
+
+  # =============================================================================
+  # NGINX - Reverse Proxy (Producción)
+  # =============================================================================
+  nginx:
+    image: nginx:alpine
+    container_name: ley21719-nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./logs/nginx:/var/log/nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - api
+      - frontend
+    networks:
+      - ley21719-network
+    restart: unless-stopped
+    profiles:
+      - production
+
+# =============================================================================
+# VOLÚMENES PERSISTENTES
+# =============================================================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# =============================================================================
+# REDES
+# =============================================================================
+networks:
+  ley21719-network:
+    driver: bridge

@@ -1,0 +1,704 @@
+# =============================================================================
+# KUBERNETES - Ley 21.719 Protección de Datos Chile
+# Manifiestos para despliegue en producción empresarial
+# Compatible con: AWS EKS, Azure AKS, Google GKE, Kubernetes on-premise
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# NAMESPACE
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ley21719
+  labels:
+    name: ley21719
+    environment: production
+---
+# -----------------------------------------------------------------------------
+# CONFIGMAP - Configuración de la aplicación
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ley21719-config
+  namespace: ley21719
+data:
+  ENVIRONMENT: "production"
+  DATABASE_HOST: "postgres-service"
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: "ley21719"
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  TZ: "America/Santiago"
+  API_WORKERS: "4"
+  CELERY_WORKER_CONCURRENCY: "4"
+  CELERY_WORKER_REPLICAS: "2"
+  LOG_LEVEL: "INFO"
+  KMS_PROVIDER: "aws"  # aws, azure, gcp, local
+---
+# -----------------------------------------------------------------------------
+# SECRET - Credenciales sensibles (en producción usar External Secrets o Vault)
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ley21719-secrets
+  namespace: ley21719
+type: Opaque
+stringData:
+  POSTGRES_USER: "ley21719_user"
+  POSTGRES_PASSWORD: "CHANGE_ME_SECURE_PASSWORD_123"
+  REDIS_PASSWORD: "CHANGE_ME_REDIS_PASSWORD_456"
+  SECRET_KEY: "CHANGE_ME_SECRET_KEY_789"
+  ENCRYPTION_KEY: "CHANGE_ME_ENCRYPTION_KEY_ABC"
+  SMTP_HOST: "smtp.gmail.com"
+  SMTP_PORT: "587"
+  SMTP_USER: "notifications@empresa.cl"
+  SMTP_PASSWORD: "CHANGE_ME_SMTP_PASSWORD"
+  FLOWER_USER: "admin"
+  FLOWER_PASSWORD: "CHANGE_ME_FLOWER_PASSWORD"
+---
+# -----------------------------------------------------------------------------
+# POSTGRESQL - StatefulSet para base de datos persistente
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: ley21719
+spec:
+  serviceName: postgres-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: ley21719-config
+                  key: DATABASE_NAME
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ley21719-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ley21719-secrets
+                  key: POSTGRES_PASSWORD
+          volumeMounts:
+            - name: postgres-storage
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: postgres-storage
+          persistentVolumeClaim:
+            claimName: postgres-pvc
+---
+# PersistentVolumeClaim para PostgreSQL
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: ley21719
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: standard
+---
+# Service para PostgreSQL
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service
+  namespace: ley21719
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres
+  clusterIP: None
+---
+# -----------------------------------------------------------------------------
+# REDIS - StatefulSet para message broker
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: ley21719
+spec:
+  serviceName: redis-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          command: ["redis-server", "--appendonly", "yes", "--requirepass", "$(REDIS_PASSWORD)"]
+          ports:
+            - containerPort: 6379
+              name: redis
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ley21719-secrets
+                  key: REDIS_PASSWORD
+          volumeMounts:
+            - name: redis-storage
+              mountPath: /data
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "--raw", "incr", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: redis-storage
+          persistentVolumeClaim:
+            claimName: redis-pvc
+---
+# PersistentVolumeClaim para Redis
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+  namespace: ley21719
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+---
+# Service para Redis
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: ley21719
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+      name: redis
+  clusterIP: None
+---
+# -----------------------------------------------------------------------------
+# API FASTAPI - Deployment con autoescalado
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: ley21719
+  labels:
+    app: api
+    version: v1
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+        version: v1
+    spec:
+      containers:
+        - name: api
+          image: ley21719-api:latest
+          imagePullPolicy: Always
+          command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres-service:5432/$(DATABASE_NAME)"
+            - name: REDIS_URL
+              value: "redis://:$(REDIS_PASSWORD)@redis-service:6379/0"
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ley21719-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ley21719-secrets
+                  key: POSTGRES_PASSWORD
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ley21719-secrets
+                  key: REDIS_PASSWORD
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ley21719-secrets
+                  key: SECRET_KEY
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ley21719-secrets
+                  key: ENCRYPTION_KEY
+          envFrom:
+            - configMapRef:
+                name: ley21719-config
+          volumeMounts:
+            - name: logs-volume
+              mountPath: /app/logs
+            - name: certificates-volume
+              mountPath: /app/certificates
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: logs-volume
+          emptyDir: {}
+        - name: certificates-volume
+          emptyDir: {}
+---
+# Service para API
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-service
+  namespace: ley21719
+spec:
+  selector:
+    app: api
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http
+  type: ClusterIP
+---
+# HorizontalPodAutoscaler para API
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-hpa
+  namespace: ley21719
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+---
+# -----------------------------------------------------------------------------
+# CELERY WORKER - Deployment para tareas asíncronas
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-worker
+  namespace: ley21719
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: celery-worker
+  template:
+    metadata:
+      labels:
+        app: celery-worker
+    spec:
+      containers:
+        - name: celery-worker
+          image: ley21719-api:latest
+          imagePullPolicy: Always
+          command: ["celery", "-A", "app.core.celery_app", "worker", "--loglevel=info", "--concurrency=4", "-Q", "lifecycle,brechas,notifications,maintenance,reports"]
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres-service:5432/$(DATABASE_NAME)"
+            - name: REDIS_URL
+              value: "redis://:$(REDIS_PASSWORD)@redis-service:6379/0"
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ley21719-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ley21719-secrets
+                  key: POSTGRES_PASSWORD
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ley21719-secrets
+                  key: REDIS_PASSWORD
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ley21719-secrets
+                  key: SECRET_KEY
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ley21719-secrets
+                  key: ENCRYPTION_KEY
+          envFrom:
+            - configMapRef:
+                name: ley21719-config
+          volumeMounts:
+            - name: logs-volume
+              mountPath: /app/logs
+            - name: certificates-volume
+              mountPath: /app/certificates
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+      volumes:
+        - name: logs-volume
+          emptyDir: {}
+        - name: certificates-volume
+          emptyDir: {}
+---
+# -----------------------------------------------------------------------------
+# CELERY BEAT - Deployment para scheduler (cron jobs)
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-beat
+  namespace: ley21719
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: celery-beat
+  template:
+    metadata:
+      labels:
+        app: celery-beat
+    spec:
+      containers:
+        - name: celery-beat
+          image: ley21719-api:latest
+          imagePullPolicy: Always
+          command: ["celery", "-A", "app.core.celery_app", "beat", "--loglevel=info"]
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres-service:5432/$(DATABASE_NAME)"
+            - name: REDIS_URL
+              value: "redis://:$(REDIS_PASSWORD)@redis-service:6379/0"
+            - name: TZ
+              value: "America/Santiago"
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ley21719-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ley21719-secrets
+                  key: POSTGRES_PASSWORD
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ley21719-secrets
+                  key: REDIS_PASSWORD
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ley21719-secrets
+                  key: SECRET_KEY
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ley21719-secrets
+                  key: ENCRYPTION_KEY
+          envFrom:
+            - configMapRef:
+                name: ley21719-config
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+# -----------------------------------------------------------------------------
+# CRONJOB - Tareas programadas específicas de Kubernetes
+# Complementa Celery Beat para tareas críticas
+# -----------------------------------------------------------------------------
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: eliminacion-automatica-cron
+  namespace: ley21719
+spec:
+  schedule: "0 2 * * *"  # Daily at 02:00 AM Chile time
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: eliminacion-worker
+              image: ley21719-api:latest
+              command: ["celery", "-A", "app.core.celery_app", "call", "app.workers.lifecycle_worker.ejecutar_eliminacion_automatica"]
+              env:
+                - name: DATABASE_URL
+                  value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres-service:5432/$(DATABASE_NAME)"
+                - name: REDIS_URL
+                  value: "redis://:$(REDIS_PASSWORD)@redis-service:6379/0"
+                - name: POSTGRES_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: ley21719-secrets
+                      key: POSTGRES_USER
+                - name: POSTGRES_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: ley21719-secrets
+                      key: POSTGRES_PASSWORD
+                - name: REDIS_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: ley21719-secrets
+                      key: REDIS_PASSWORD
+              envFrom:
+                - configMapRef:
+                    name: ley21719-config
+          restartPolicy: OnFailure
+---
+# CronJob para reporte mensual de cumplimiento
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: reporte-mensual-cron
+  namespace: ley21719
+spec:
+  schedule: "0 9 1 * *"  # First day of month at 09:00 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: reporte-worker
+              image: ley21719-api:latest
+              command: ["celery", "-A", "app.core.celery_app", "call", "app.workers.notificaciones_worker.generar_reporte_mensual"]
+              envFrom:
+                - configMapRef:
+                    name: ley21719-config
+                - secretKeyRef:
+                    name: ley21719-secrets
+                    key: POSTGRES_USER
+          restartPolicy: OnFailure
+---
+# -----------------------------------------------------------------------------
+# FRONTEND REACT - Deployment
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: ley21719
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: ley21719-frontend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+              name: http
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 30
+---
+# Service para Frontend
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+  namespace: ley21719
+spec:
+  selector:
+    app: frontend
+  ports:
+    - port: 80
+      targetPort: 80
+      name: http
+  type: ClusterIP
+---
+# -----------------------------------------------------------------------------
+# INGRESS - Controlador de tráfico externo (NGINX Ingress)
+# -----------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ley21719-ingress
+  namespace: ley21719
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+    - hosts:
+        - ley21719.empresa.cl
+      secretName: ley21719-tls-secret
+  rules:
+    - host: ley21719.empresa.cl
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api-service
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-service
+                port:
+                  number: 80
+---
+# -----------------------------------------------------------------------------
+# NETWORK POLICY - Seguridad de red
+# -----------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ley21719-network-policy
+  namespace: ley21719
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Permitir tráfico interno entre pods del namespace
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ley21719
+  egress:
+    # Permitir salida a internet para notificaciones SMTP y API Agencia
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 587
