@@ -11,7 +11,7 @@ from typing import Optional
 import os
 import base64
 from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives.ciphers.aes import AESGCM
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import logging
 
 logger = logging.getLogger(__name__)

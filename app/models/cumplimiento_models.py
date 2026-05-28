@@ -13,6 +13,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
 import enum
+from datetime import datetime
 from app.database import Base
 
 
@@ -327,8 +328,8 @@ class EstadoSupresion(enum.Enum):
 class SolicitudSupresion(Base):
     __tablename__ = "solicitudes_supresion"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, index=True)
-    usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=False, index=True)
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    usuario_id = Column(PGUUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=False, index=True)
     rut_ciudadano_hash = Column(String, nullable=False, index=True)
     
     motivo = Column(Text, nullable=False)

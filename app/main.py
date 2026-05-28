@@ -19,8 +19,10 @@ from app.models import cumplimiento_models  # Importar modelos de cumplimiento
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Gestión del ciclo de vida de la aplicación"""
-    # Startup: Crear tablas si no existen
-    Base.metadata.create_all(bind=engine)
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        print(f"Warning on startup DB creation: {e}")
     yield
     # Shutdown
     pass

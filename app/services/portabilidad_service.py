@@ -8,8 +8,8 @@ import json
 import csv
 import io
 from typing import List, Dict, Any
-from app.models.core_models import Usuario, AccesoOrganizacion, LogAccesoDatos, SolicitudArco
-from app.services.criptografia_service import CriptografiaService
+from app.models.models import Usuario, AccesoOrganizacion, LogAccesoDatos, SolicitudArco
+from app.services.kms_factory import decrypt_data
 
 
 class PortabilidadService:
@@ -25,7 +25,7 @@ class PortabilidadService:
             raise ValueError(f"Usuario {usuario_id} no encontrado")
         
         # Desencriptar RUT para exportación (solo el titular puede verlo)
-        rut_desencriptado = CriptografiaService.desencriptar_rut(usuario.rut_encriptado)
+        rut_desencriptado = decrypt_data(usuario.rut_encriptado)
         
         # Obtener todos los accesos/consentimientos
         accesos = db.query(AccesoOrganizacion).filter(

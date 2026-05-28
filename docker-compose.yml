@@ -54,8 +54,8 @@ services:
   # =============================================================================
   api:
     build:
-      context: ./app
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: app/Dockerfile
     container_name: ley21719-api
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${API_WORKERS:-4}
     environment:
@@ -71,9 +71,9 @@ services:
       SMTP_USER: ${SMTP_USER}
       SMTP_PASSWORD: ${SMTP_PASSWORD}
     volumes:
-      - ./app:/app
-      - ./logs:/app/logs
-      - ./certificates:/app/certificates
+      - .:/workspace
+      - ./logs:/workspace/logs
+      - ./certificates:/workspace/certificates
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
@@ -103,8 +103,8 @@ services:
   # =============================================================================
   celery-worker:
     build:
-      context: ./app
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: app/Dockerfile
     # container_name eliminado para permitir replicas
     command: celery -A app.core.celery_app worker --loglevel=info --concurrency=${CELERY_WORKER_CONCURRENCY:-4} -Q lifecycle,brechas,notifications,maintenance,reports
     environment:
@@ -120,9 +120,9 @@ services:
       SMTP_USER: ${SMTP_USER}
       SMTP_PASSWORD: ${SMTP_PASSWORD}
     volumes:
-      - ./app:/app
-      - ./logs:/app/logs
-      - ./certificates:/app/certificates
+      - .:/workspace
+      - ./logs:/workspace/logs
+      - ./certificates:/workspace/certificates
     depends_on:
       postgres:
         condition: service_healthy
@@ -151,8 +151,8 @@ services:
   # =============================================================================
   celery-beat:
     build:
-      context: ./app
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: app/Dockerfile
     container_name: ley21719-celery-beat
     command: celery -A app.core.celery_app beat --loglevel=info
     environment:
@@ -164,8 +164,8 @@ services:
       KMS_PROVIDER: ${KMS_PROVIDER:-local}
       TZ: America/Santiago
     volumes:
-      - ./app:/app
-      - ./logs:/app/logs
+      - .:/workspace
+      - ./logs:/workspace/logs
     depends_on:
       postgres:
         condition: service_healthy
@@ -180,8 +180,8 @@ services:
   # =============================================================================
   flower:
     build:
-      context: ./app
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: app/Dockerfile
     container_name: ley21719-flower
     command: celery -A app.core.celery_app flower --port=5555
     environment:

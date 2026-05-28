@@ -1,218 +1,110 @@
-import { useState } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useState } from "react";
+import { useAuth } from "../context/AuthContext";
 
 export default function LoginPage() {
+  const [loginType, setLoginType] = useState<"CIUDADANO" | "ORGANIZACION" | null>(null);
   const { loginClaveUnica, loginSii } = useAuth();
-  const [loginType, setLoginType] = useState<'ciudadano' | 'organizacion' | null>(null);
 
   return (
-    <div style={styles.container}>
-      <div style={styles.card}>
-        <h1 style={styles.title}>Ley 21.719</h1>
-        <h2 style={styles.subtitle}>Sistema de Protección de Datos</h2>
-        
+    <div className="app-container" style={{ justifyContent: 'center', alignItems: 'center' }}>
+      <div className="glass-card animate-fade-in" style={{ width: '100%', maxWidth: '480px', textAlign: 'center', padding: '40px' }}>
+        <div style={{ marginBottom: '32px' }}>
+          <h1 className="page-title" style={{ marginBottom: '8px', background: 'linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+            Ley 21.719
+          </h1>
+          <p className="page-subtitle">Sistema de Protección de Datos Personales</p>
+        </div>
+
         {!loginType ? (
-          <div style={styles.options}>
+          <div className="flex" style={{ flexDirection: 'column', gap: '16px' }}>
             <button 
-              style={styles.buttonPrimary} 
-              onClick={() => setLoginType('ciudadano')}
+              className="btn-primary" 
+              style={{ padding: '16px', fontSize: '1.1rem' }}
+              onClick={() => setLoginType("CIUDADANO")}
             >
-              Soy Ciudadano
+              Ingresar como Ciudadano
             </button>
             <button 
-              style={styles.buttonSecondary} 
-              onClick={() => setLoginType('organizacion')}
+              className="btn-secondary" 
+              style={{ padding: '16px', fontSize: '1.1rem' }}
+              onClick={() => setLoginType("ORGANIZACION")}
             >
-              Soy Organización
+              Ingresar como Organización
             </button>
           </div>
-        ) : loginType === 'ciudadano' ? (
-          <div style={styles.loginOptions}>
-            <h3 style={styles.sectionTitle}>Autenticación para Ciudadanos</h3>
-            <p style={styles.description}>
-              Ingresa con tu ClaveÚnica del Gobierno de Chile para gestionar tus datos personales
-            </p>
+        ) : loginType === "CIUDADANO" ? (
+          <div className="animate-fade-in flex" style={{ flexDirection: 'column', gap: '24px' }}>
+            <div className="glass-panel" style={{ padding: '24px', borderRadius: '12px', background: 'rgba(79, 70, 229, 0.05)' }}>
+              <h3 style={{ marginBottom: '8px' }}>Portal Ciudadano</h3>
+              <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Gestiona tus consentimientos y ejerce tus derechos ARCO.</p>
+            </div>
+            
             <button 
-              style={styles.claveUnicaButton} 
+              className="btn-primary" 
               onClick={loginClaveUnica}
+              style={{ padding: '16px', fontSize: '1.1rem', background: '#0f172a' }}
             >
-              <img 
-                src="https://www.claveunica.gob.cl/img/logo-claveunica.svg" 
-                alt="ClaveÚnica" 
-                style={styles.logo}
+              <img
+                src="https://www.claveunica.gob.cl/img/logo-claveunica.svg"
+                alt="ClaveÚnica"
+                style={{ height: '24px', marginRight: '8px', filter: 'brightness(0) invert(1)' }}
               />
               Ingresar con ClaveÚnica
             </button>
-            <button 
-              style={styles.backButton} 
-              onClick={() => setLoginType(null)}
-            >
+            <button className="btn-secondary" onClick={() => setLoginType(null)}>
               ← Volver
             </button>
           </div>
         ) : (
-          <div style={styles.loginOptions}>
-            <h3 style={styles.sectionTitle}>Autenticación para Organizaciones</h3>
-            <p style={styles.description}>
-              Ingresa con Clave Tributaria del SII para gestionar los datos de tu organización
-            </p>
+          <div className="animate-fade-in flex" style={{ flexDirection: 'column', gap: '24px' }}>
+            <div className="glass-panel" style={{ padding: '24px', borderRadius: '12px', background: 'rgba(14, 165, 233, 0.05)' }}>
+              <h3 style={{ marginBottom: '8px' }}>Portal Organizaciones</h3>
+              <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Centro de Cumplimiento DPO y Gestión Normativa.</p>
+            </div>
+
+            <div className="form-group" style={{ textAlign: 'left' }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: 'var(--text-main)' }}>RUT Organización</label>
+              <input 
+                type="text" 
+                id="rut-org"
+                defaultValue="76.123.456-7"
+                style={{ 
+                  width: '100%', 
+                  padding: '12px', 
+                  borderRadius: '8px', 
+                  border: '1px solid var(--surface-glass-border)',
+                  background: 'rgba(255, 255, 255, 0.5)'
+                }} 
+              />
+            </div>
+
             <button 
-              style={styles.siiButton} 
-              onClick={loginSii}
+              className="btn-primary" 
+              onClick={() => {
+                const rut = (document.getElementById('rut-org') as HTMLInputElement).value;
+                loginSii(rut);
+              }}
+              style={{ padding: '16px', fontSize: '1.1rem', background: '#0284c7' }}
             >
-              <img 
-                src="https://www.sii.cl/images/logos/sii-logo.svg" 
-                alt="SII" 
-                style={styles.logo}
+              <img
+                src="https://www.sii.cl/images/logos/sii-logo.svg"
+                alt="SII"
+                style={{ height: '24px', marginRight: '8px', filter: 'brightness(0) invert(1)' }}
               />
               Ingresar con Clave Tributaria SII
             </button>
-            <button 
-              style={styles.backButton} 
-              onClick={() => setLoginType(null)}
-            >
+            <button className="btn-secondary" onClick={() => setLoginType(null)}>
               ← Volver
             </button>
           </div>
         )}
 
-        <div style={styles.footer}>
-          <p style={styles.legalText}>
-            Este sistema cumple con la Ley 21.719 de Protección de Datos Personales de Chile
+        <div style={{ marginTop: '40px', paddingTop: '20px', borderTop: '1px solid var(--surface-glass-border)' }}>
+          <p style={{ fontSize: '0.8rem', margin: 0, color: 'var(--text-muted)' }}>
+            Plataforma Segura GovTech - Chile
           </p>
         </div>
       </div>
     </div>
   );
 }
-
-const styles: { [key: string]: React.CSSProperties } = {
-  container: {
-    minHeight: '100vh',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    padding: '20px',
-  },
-  card: {
-    background: 'white',
-    borderRadius: '16px',
-    padding: '40px',
-    maxWidth: '500px',
-    width: '100%',
-    boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
-  },
-  title: {
-    fontSize: '32px',
-    fontWeight: 'bold',
-    color: '#333',
-    textAlign: 'center',
-    marginBottom: '8px',
-  },
-  subtitle: {
-    fontSize: '18px',
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: '32px',
-  },
-  options: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '16px',
-  },
-  buttonPrimary: {
-    padding: '16px 32px',
-    fontSize: '18px',
-    fontWeight: '600',
-    color: 'white',
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    border: 'none',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    transition: 'transform 0.2s',
-  },
-  buttonSecondary: {
-    padding: '16px 32px',
-    fontSize: '18px',
-    fontWeight: '600',
-    color: '#667eea',
-    background: '#f0f0ff',
-    border: '2px solid #667eea',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    transition: 'transform 0.2s',
-  },
-  loginOptions: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '20px',
-  },
-  sectionTitle: {
-    fontSize: '20px',
-    fontWeight: '600',
-    color: '#333',
-    textAlign: 'center',
-  },
-  description: {
-    fontSize: '14px',
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: '1.5',
-  },
-  claveUnicaButton: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    padding: '16px 32px',
-    fontSize: '16px',
-    fontWeight: '600',
-    color: 'white',
-    background: '#00b5e2',
-    border: 'none',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    width: '100%',
-    justifyContent: 'center',
-  },
-  siiButton: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    padding: '16px 32px',
-    fontSize: '16px',
-    fontWeight: '600',
-    color: 'white',
-    background: '#c41230',
-    border: 'none',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    width: '100%',
-    justifyContent: 'center',
-  },
-  logo: {
-    height: '24px',
-    width: 'auto',
-  },
-  backButton: {
-    padding: '12px 24px',
-    fontSize: '14px',
-    color: '#666',
-    background: 'transparent',
-    border: '1px solid #ddd',
-    borderRadius: '6px',
-    cursor: 'pointer',
-  },
-  footer: {
-    marginTop: '32px',
-    paddingTop: '24px',
-    borderTop: '1px solid #eee',
-  },
-  legalText: {
-    fontSize: '12px',
-    color: '#999',
-    textAlign: 'center',
-    lineHeight: '1.4',
-  },
-};

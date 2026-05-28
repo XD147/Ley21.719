@@ -80,6 +80,7 @@ frontend/
 ## Flujo de Autenticación
 
 ### Ciudadanos (ClaveÚnica)
+
 1. Usuario selecciona "Soy Ciudadano"
 2. Click en "Ingresar con ClaveÚnica"
 3. Redirección a `https://accounts.claveunica.gob.cl/oauth2/authorize`
@@ -89,6 +90,7 @@ frontend/
 7. Redirección a `/dashboard`
 
 ### Organizaciones (SII)
+
 1. Usuario selecciona "Soy Organización"
 2. Click en "Ingresar con Clave Tributaria SII"
 3. Redirección a OAuth del SII
@@ -100,6 +102,7 @@ frontend/
 ## Endpoints Consumidos
 
 ### Autenticación
+
 - `GET /auth/claveunica/login` - Inicia flujo ClaveÚnica
 - `POST /auth/claveunica/callback` - Callback OAuth
 - `GET /auth/sii/login` - Inicia flujo SII
@@ -109,13 +112,16 @@ frontend/
 - `POST /auth/logout` - Cierra sesión
 
 ### Usuario
+
 - `GET /usuarios/me` - Obtiene perfil del usuario
 
 ### Accesos
+
 - `GET /accesos/mis-accesos` - Lista accesos otorgados
 - `PUT /accesos/:id/revocar` - Revoca acceso
 
 ### Solicitudes ARCO
+
 - `GET /solicitudes-arco/mis-solicitudes` - Lista solicitudes
 - `POST /solicitudes-arco` - Crea nueva solicitud
 

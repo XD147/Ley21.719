@@ -111,7 +111,7 @@ class Organizacion(Base):
     api_keys = relationship("OrganizacionApiKey", back_populates="organizacion", cascade="all, delete-orphan")
     accesos = relationship("AccesoOrganizacion", back_populates="organizacion", cascade="all, delete-orphan")
     solicitudes_arco = relationship("SolicitudArco", back_populates="organizacion", cascade="all, delete-orphan")
-    solicitudes_consentimiento = relationship("SolicitudConsentimiento", back_populates="organizacion", cascade="all, delete-orphan")
+    solicitudes_consentimiento = relationship("SolicitudConsentimiento", back_populates="organizacion", cascade="all, delete-orphan", foreign_keys="[SolicitudConsentimiento.organizacion_id]")
     logs_acceso = relationship("LogAccesoDatos", back_populates="organizacion", cascade="all, delete-orphan")
     
     def __repr__(self):

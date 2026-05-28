@@ -13,7 +13,7 @@ from datetime import datetime
 
 from app.database import get_db
 from app.models.models import Organizacion, Usuario
-from app.services.portabilidad_service import ServicioPortabilidad
+from app.services.portabilidad_service import PortabilidadService
 from app.services.ciclo_vida_service import ServicioCicloVidaDatos
 from app.api.routes import get_current_organization, get_current_usuario as get_current_user
 
@@ -34,7 +34,7 @@ async def solicitar_exportacion_portabilidad(
     Solicitar exportación de datos personales para portabilidad
     Formatos soportados: JSON, XML, CSV
     """
-    servicio = ServicioPortabilidad(db)
+    servicio = PortabilidadService(db)
     
     try:
         exportacion = await servicio.solicitar_exportacion(
@@ -64,7 +64,7 @@ async def obtener_estado_exportacion(
     current_user: Usuario = Depends(get_current_user)
 ):
     """Obtener estado de una solicitud de exportación"""
-    servicio = ServicioPortabilidad(db)
+    servicio = PortabilidadService(db)
     
     try:
         estado = await servicio.obtener_estado_exportacion(exportacion_id)
@@ -82,7 +82,7 @@ async def descargar_exportacion(
     Descargar archivo de exportación con token seguro
     El token expira en 24 horas
     """
-    servicio = ServicioPortabilidad(db)
+    servicio = PortabilidadService(db)
     
     try:
         resultado = await servicio.descargar_exportacion(token_hash)
@@ -109,7 +109,7 @@ async def listar_exportaciones_usuario(
     current_user: Usuario = Depends(get_current_user)
 ):
     """Listar historial de exportaciones realizadas por el usuario"""
-    servicio = ServicioPortabilidad(db)
+    servicio = PortabilidadService(db)
     exportaciones = await servicio.listar_exportaciones_usuario(current_user.id, limite)
     
     return {
@@ -132,7 +132,7 @@ async def crear_traduccion_legal(
     Crear traducción de lenguaje legal a lenguaje ciudadano
     Categorías: finalidad, derechos, retencion, transferencia, seguridad
     """
-    servicio = ServicioPortabilidad(db)
+    servicio = PortabilidadService(db)
     
     if categoria not in ["finalidad", "derechos", "retencion", "transferencia", "seguridad"]:
         raise HTTPException(
