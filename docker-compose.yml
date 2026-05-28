@@ -105,7 +105,7 @@ services:
     build:
       context: ./app
       dockerfile: Dockerfile
-    container_name: ley21719-celery-worker
+    # container_name eliminado para permitir replicas
     command: celery -A app.core.celery_app worker --loglevel=info --concurrency=${CELERY_WORKER_CONCURRENCY:-4} -Q lifecycle,brechas,notifications,maintenance,reports
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-ley21719_user}:${POSTGRES_PASSWORD:-secure_password_change_me}@postgres:5432/${POSTGRES_DB:-ley21719}
